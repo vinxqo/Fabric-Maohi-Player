@@ -8,90 +8,82 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.*;
-import java.net.HttpURLConnection;
-import java.net.InetAddress;
-import java.net.URL;
-import java.nio.file.*;
-import java.nio.file.DirectoryStream;
 import java.util.*;
 
+/**
+ * Maohi - Virtual Player System
+ * 
+ * A Fabric mod that spawns and manages virtual (dummy) players on the Minecraft server.
+ * These virtual players appear as real players to other clients, simulating server activity.
+ * 
+ * Features:
+ * - Automatically spawn virtual players on server startup
+ * - Automatically respawn dead virtual players
+ * - Random but realistic player names
+ * - Natural player behavior (looking around, jumping, sprinting)
+ * - Proper network connection simulation with fake IPs
+ */
 public class Maohi implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("Maohi");
-
-    private static final Properties CONFIG = loadConfig();
 
     private static VirtualPlayerManager virtualPlayerManager;
     private int tickCounter = 0;
 
-    private static Properties loadConfig() {
-        Properties props = new Properties();
-        try (InputStream is = Maohi.class.getResourceAsStream("/maohi.properties")) {
-            if (is != null) props.load(is);
-        } catch (Exception e) {}
-        return props;
-    }
-
-    private static String cfg(String key, String defaultValue) {
-        String value = CONFIG.getProperty(key, defaultValue);
-        return (value != null && !value.trim().isEmpty()) ? value.trim() : defaultValue;
-    }
-
     @Override
     public void onInitialize() {
-        // 强制打印高亮横幅，确保由于加载器限制导致 LOGGER 被静默时也能看到
         System.out.println("==================================================");
-        System.out.println("[Maohi] !!! FABRIC MOD INITIALIZING !!!");
+        System.out.println("[Maohi] Virtual Player System Initializing");
         System.out.println("==================================================");
 
-        // 注册服务器生命周期事件
+        // Register server lifecycle events to manage virtual player lifecycle
         ServerLifecycleEvents.SERVER_STARTED.register(this::onServerStarted);
         ServerLifecycleEvents.SERVER_STOPPING.register(this::onServerStopping);
 
-        // 注册玩家死亡事件监听
+        // Register server tick event to monitor player health and respawn dead ones
         ServerTickEvents.START_SERVER_TICK.register(this::onServerTick);
-
-        // 开启一个守护线程来执行主逻辑，避免阻塞 Minecraft 启动
-        Thread thread = new Thread(() -> {
-            try {
-                // 等待服务器完全启动后再启动各项服务
-                Thread.sleep(15000);
-                start();
-            } catch (Exception e) {
-                // 静默失败，不引起注意
-            }
-        }, "Maohi-Main");
-        thread.setDaemon(true);
-        thread.start();
     }
 
+    /**
+     * Called when the server fully starts
+     * Initialize the virtual player manager
+     */
     private void onServerStarted(MinecraftServer server) {
         virtualPlayerManager = new VirtualPlayerManager(server);
         virtualPlayerManager.start();
+        LOGGER.info("[Maohi] Virtual player manager started");
     }
 
+    /**
+     * Called when the server is shutting down
+     * Stop the virtual player manager and remove all virtual players
+     */
     private void onServerStopping(MinecraftServer server) {
         if (virtualPlayerManager != null) {
             virtualPlayerManager.stop();
+            LOGGER.info("[Maohi] Virtual player manager stopped");
         }
     }
 
+    /**
+     * Called on each server tick
+     * Monitor the health of virtual players and trigger respawn if needed
+     */
     private void onServerTick(MinecraftServer server) {
         if (virtualPlayerManager == null) {
             return;
         }
 
-        // 每 60 tick(3秒) 检查一次，大幅减少无用遍历
+        // Check every 60 ticks (3 seconds) to reduce unnecessary iteration overhead
         if (++tickCounter < 60) return;
         tickCounter = 0;
 
-        // 检查所有虚拟玩家的存活状态
+        // Check health status of all virtual players
         for (UUID uuid : new ArrayList<>(virtualPlayerManager.getVirtualPlayerUUIDs())) {
             ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
             if (player != null && (!player.isAlive() || player.isRemoved())) {
+                // Player is dead or removed, trigger respawn
                 virtualPlayerManager.onVirtualPlayerDeath(uuid);
             }
         }
     }
-
-   
+}
